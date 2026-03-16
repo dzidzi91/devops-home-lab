@@ -1,0 +1,63 @@
+pipeline {
+    agent any
+
+    environment {
+        IMAGE_NAME = "localhost:5000/devops-platform-app:${BUILD_NUMBER}"
+        LOCAL_IMAGE = "devops-platform-app:${BUILD_NUMBER}"
+        TEST_CONTAINER = "devops-platform-app-ci"
+        TEST_NETWORK = "docker_devops-network"
+    }
+
+    stages {
+        stage('Build Docker Image') {
+            steps {
+                echo 'Building Docker image...'
+                sh "docker build -t ${LOCAL_IMAGE} /vagrant/app"
+            }
+        }
+
+        stage('Tag Docker Image') {
+            steps {
+                echo 'Tagging Docker image...'
+                sh "docker tag ${LOCAL_IMAGE} ${IMAGE_NAME}"
+            }
+        }
+
+        stage('Push Docker Image to Registry') {
+            steps {
+                echo 'Pushing Docker image to registry...'
+                sh "docker push ${IMAGE_NAME}"
+            }
+        }
+
+        stage('Stop Old Test Container') {
+            steps {
+                sh "docker rm -f ${TEST_CONTAINER} || true"
+            }
+        }
+
+        stage('Run Test Container') {
+            steps {
+                sh """
+                    docker run -d \
+                      --network ${TEST_NETWORK} \
+                      --name ${TEST_CONTAINER} \
+                      -p 8001:8000 \
+                      ${IMAGE_NAME}
+                """
+            }
+        }
+
+        stage('Test Application') {
+            steps {
+                sh '''
+                    for i in $(seq 1 10); do
+                      curl -fsS http://devops-platform-app-ci:8000 && exit 0
+                      sleep 2
+                    done
+                    exit 1
+                '''
+            }
+        }
+    }
+}

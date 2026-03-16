@@ -1,0 +1,78 @@
+version: "3.8"
+
+services:
+  devops-platform-app:
+    build:
+      context: ../app
+      dockerfile: Dockerfile
+    container_name: devops-platform-app
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    networks:
+      - devops-network
+
+  nginx:
+    image: nginx:stable-alpine
+    container_name: devops-platform-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx:/etc/nginx/conf.d:ro
+    depends_on:
+      - devops-platform-app
+    restart: unless-stopped
+    networks:
+      - devops-network
+
+  jenkins:
+    build:
+      context: ../jenkins
+      dockerfile: Dockerfile
+    container_name: devops-platform-jenkins
+    user: root
+    ports:
+      - "8080:8080"
+      - "50000:50000"
+    volumes:
+      - jenkins_home:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ../:/vagrant
+    restart: unless-stopped
+    networks:
+      - devops-network
+
+  registry:
+    image: registry:2
+    container_name: devops-platform-registry
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./data/registry:/var/lib/registry
+    restart: unless-stopped
+    networks:
+      - devops-network
+
+  registry-ui:
+    image: joxit/docker-registry-ui:latest
+    container_name: devops-platform-registry-ui
+    ports:
+      - "5001:80"
+    environment:
+      - REGISTRY_TITLE=DevOps Registry
+      - NGINX_PROXY_PASS_URL=http://registry:5000
+      - DELETE_IMAGES=true
+      - SHOW_CONTENT_DIGEST=true
+      - SINGLE_REGISTRY= true
+    depends_on:
+      - registry
+    restart: unless-stopped
+    networks:
+      - devops-network
+
+networks:
+  devops-network:
+    driver: bridge
+
+volumes:
+  jenkins_home:
