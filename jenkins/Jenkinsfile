@@ -9,6 +9,8 @@ pipeline {
         REGISTRY_IMAGE = "localhost:5000/devops-platform-app"
         APP_CONTAINER = "devops-platform-app"
         APP_PORT = "8000"
+        APP_NAME = "devops-platform"
+        APP_ENV = "dev"
     }
 
     stages {
@@ -39,6 +41,9 @@ pipeline {
                     docker run -d \
                       --name ${APP_CONTAINER} \
                       -p ${APP_PORT}:8000 \
+                      -e APP_NAME=${APP_NAME} \
+                      -e APP_ENV=${APP_ENV} \
+                      -e APP_VERSION=${params.IMAGE_TAG} \
                       ${REGISTRY_IMAGE}:${params.IMAGE_TAG}
                 """
             }
@@ -50,6 +55,16 @@ pipeline {
                     sleep 5
                     docker ps --filter "name=${APP_CONTAINER}" --filter "status=running"
                     docker inspect -f '{{.State.Running}}' ${APP_CONTAINER} | grep true
+                '''
+            }
+        }
+
+        stage('Health Check') {
+            steps {
+                sh '''
+                    curl --fail http://localhost:8000/health
+                    curl --fail http://localhost:8000/version
+                    curl --fail http://localhost:8000/info
                 '''
             }
         }
