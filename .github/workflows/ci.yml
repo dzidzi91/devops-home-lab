@@ -38,3 +38,7 @@ jobs:
       - name: Push ci tag
         run: |
           docker push $IMAGE_NAME:ci
+
+      - name: Trigger Jenkins Deploy
+        run: |
+          curl -X POST "http://localhost:8080/job/devops-platform-pipeline/build?token=deploy-ci-token"
