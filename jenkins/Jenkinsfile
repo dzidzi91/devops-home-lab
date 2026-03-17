@@ -11,6 +11,7 @@ pipeline {
         APP_PORT = "8000"
         APP_NAME = "devops-platform"
         APP_ENV = "dev"
+        DEPLOY_HOST = "192.168.56.10"
     }
 
     stages {
@@ -62,9 +63,10 @@ pipeline {
         stage('Health Check') {
             steps {
                 sh '''
-                    curl --fail http://localhost:8000/health
-                    curl --fail http://localhost:8000/version
-                    curl --fail http://localhost:8000/info
+                    sleep 5
+                    curl --fail http://${DEPLOY_HOST}:${APP_PORT}/health
+                    curl --fail http://${DEPLOY_HOST}:${APP_PORT}/version
+                    curl --fail http://${DEPLOY_HOST}:${APP_PORT}/info
                 '''
             }
         }
