@@ -1,0 +1,40 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-push:
+    runs-on: self-hosted
+
+    env:
+      IMAGE_NAME: localhost:5000/devops-platform-app
+      IMAGE_TAG: build-${{ github.run_number }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Show environment
+        run: |
+          uname -m
+          docker version
+          docker ps
+
+      - name: Build Docker image
+        run: |
+          docker build -t $IMAGE_NAME:$IMAGE_TAG -f app/Dockerfile app
+
+      - name: Tag image as ci
+        run: |
+          docker tag $IMAGE_NAME:$IMAGE_TAG $IMAGE_NAME:ci
+
+      - name: Push build tag
+        run: |
+          docker push $IMAGE_NAME:$IMAGE_TAG
+
+      - name: Push ci tag
+        run: |
+          docker push $IMAGE_NAME:ci
