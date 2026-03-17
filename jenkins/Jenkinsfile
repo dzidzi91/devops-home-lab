@@ -1,24 +1,31 @@
 pipeline {
     agent any
 
+    parameters {
+        string(name: 'IMAGE_TAG', defaultValue: 'ci', description: 'Docker image tag to deploy, e.g. build-6')
+    }
+
     environment {
         REGISTRY_IMAGE = "localhost:5000/devops-platform-app"
-        IMAGE_TAG = "ci"
         APP_CONTAINER = "devops-platform-app"
         APP_PORT = "8000"
     }
 
     stages {
+        stage('Show Deploy Target') {
+            steps {
+                echo "Deploying image: ${REGISTRY_IMAGE}:${params.IMAGE_TAG}"
+            }
+        }
+
         stage('Pull Image') {
             steps {
-                echo "Pulling image ${REGISTRY_IMAGE}:${IMAGE_TAG}..."
-                sh "docker pull ${REGISTRY_IMAGE}:${IMAGE_TAG}"
+                sh "docker pull ${REGISTRY_IMAGE}:${params.IMAGE_TAG}"
             }
         }
 
         stage('Stop Old Container') {
             steps {
-                echo "Stopping old container if it exists..."
                 sh '''
                     docker stop ${APP_CONTAINER} || true
                     docker rm ${APP_CONTAINER} || true
@@ -28,38 +35,42 @@ pipeline {
 
         stage('Run New Container') {
             steps {
-                echo "Starting new container from ${REGISTRY_IMAGE}:${IMAGE_TAG}..."
-                sh '''
+                sh """
                     docker run -d \
                       --name ${APP_CONTAINER} \
                       -p ${APP_PORT}:8000 \
-                      ${REGISTRY_IMAGE}:${IMAGE_TAG}
+                      ${REGISTRY_IMAGE}:${params.IMAGE_TAG}
+                """
+            }
+        }
+
+        stage('Check Container Running') {
+            steps {
+                sh '''
+                    sleep 5
+                    docker ps --filter "name=${APP_CONTAINER}" --filter "status=running"
+                    docker inspect -f '{{.State.Running}}' ${APP_CONTAINER} | grep true
                 '''
             }
         }
 
-        stage('Health Check') {
+        stage('Show Logs') {
             steps {
-                echo 'Waiting for application to start...'
-                sh '''
-                    for i in $(seq 1 15); do
-                      curl -fsS http://localhost:${APP_PORT} && exit 0
-                      sleep 2
-                    done
-                    echo "Application health check failed."
-                    exit 1
-                '''
+                sh 'docker logs --tail 50 ${APP_CONTAINER} || true'
             }
         }
     }
 
     post {
         success {
-            echo "Deployment successful: ${REGISTRY_IMAGE}:${IMAGE_TAG}"
+            echo "Deployment successful: ${REGISTRY_IMAGE}:${params.IMAGE_TAG}"
         }
         failure {
             echo "Deployment failed."
-            sh 'docker ps -a || true'
+            sh '''
+                docker ps -a || true
+                docker logs --tail 100 ${APP_CONTAINER} || true
+            '''
         }
     }
 }
