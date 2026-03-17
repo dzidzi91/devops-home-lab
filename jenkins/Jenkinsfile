@@ -1,63 +1,69 @@
 pipeline {
     agent any
 
+    parameters {
+        string(name: 'IMAGE_TAG', defaultValue: 'ci', description: 'Docker image tag to deploy, e.g. build-1')
+    }
+
     environment {
-        IMAGE_NAME = "localhost:5000/devops-platform-app:${BUILD_NUMBER}"
-        LOCAL_IMAGE = "devops-platform-app:${BUILD_NUMBER}"
-        TEST_CONTAINER = "devops-platform-app-ci"
-        TEST_NETWORK = "docker_devops-network"
+        REGISTRY_IMAGE = "localhost:5000/devops-platform-app"
+        IMAGE = "${REGISTRY_IMAGE}:${params.IMAGE_TAG}"
+        APP_CONTAINER = "devops-platform-app"
+        APP_PORT = "8000"
     }
 
     stages {
-        stage('Build Docker Image') {
+        stage('Pull Image') {
             steps {
-                echo 'Building Docker image...'
-                sh "docker build -t ${LOCAL_IMAGE} /vagrant/app"
+                echo "Pulling image ${IMAGE}..."
+                sh "docker pull ${IMAGE}"
             }
         }
 
-        stage('Tag Docker Image') {
+        stage('Stop Old Container') {
             steps {
-                echo 'Tagging Docker image...'
-                sh "docker tag ${LOCAL_IMAGE} ${IMAGE_NAME}"
-            }
-        }
-
-        stage('Push Docker Image to Registry') {
-            steps {
-                echo 'Pushing Docker image to registry...'
-                sh "docker push ${IMAGE_NAME}"
-            }
-        }
-
-        stage('Stop Old Test Container') {
-            steps {
-                sh "docker rm -f ${TEST_CONTAINER} || true"
-            }
-        }
-
-        stage('Run Test Container') {
-            steps {
-                sh """
-                    docker run -d \
-                      --network ${TEST_NETWORK} \
-                      --name ${TEST_CONTAINER} \
-                      -p 8001:8000 \
-                      ${IMAGE_NAME}
-                """
-            }
-        }
-
-        stage('Test Application') {
-            steps {
+                echo "Stopping old container if it exists..."
                 sh '''
-                    for i in $(seq 1 10); do
-                      curl -fsS http://devops-platform-app-ci:8000 && exit 0
+                    docker stop ${APP_CONTAINER} || true
+                    docker rm ${APP_CONTAINER} || true
+                '''
+            }
+        }
+
+        stage('Run New Container') {
+            steps {
+                echo "Starting new container from ${IMAGE}..."
+                sh '''
+                    docker run -d \
+                      --name ${APP_CONTAINER} \
+                      -p ${APP_PORT}:8000 \
+                      ${IMAGE}
+                '''
+            }
+        }
+
+        stage('Health Check') {
+            steps {
+                echo 'Waiting for application to start...'
+                sh '''
+                    for i in $(seq 1 15); do
+                      curl -fsS http://localhost:${APP_PORT} && exit 0
                       sleep 2
                     done
+                    echo "Application health check failed."
                     exit 1
                 '''
             }
+        }
+    }
+
+    post {
+        success {
+            echo "Deployment successful: ${IMAGE}"
+        }
+        failure {
+            echo "Deployment failed."
+            sh 'docker ps -a || true'
         }
     }
 }
