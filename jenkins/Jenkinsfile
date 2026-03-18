@@ -1,93 +1,53 @@
 pipeline {
     agent any
 
-    parameters {
-        string(name: 'IMAGE_TAG', defaultValue: 'ci', description: 'Docker image tag to deploy, e.g. build-6')
-    }
-
     environment {
-        REGISTRY_IMAGE = "localhost:5000/devops-platform-app"
-        APP_CONTAINER = "devops-platform-app"
-        APP_PORT = "8000"
-        APP_NAME = "devops-platform"
-        APP_ENV = "dev"
-        DEPLOY_HOST = "192.168.56.10"
+        IMAGE_NAME = "192.168.56.10:5000/devops-platform-app"
+        IMAGE_TAG = "build-${BUILD_NUMBER}"
+        KUBECONFIG_FILE = credentials('k8s-homelab-kubeconfig')
     }
 
     stages {
-        stage('Show Deploy Target') {
+        stage('Checkout') {
             steps {
-                echo "Deploying image: ${REGISTRY_IMAGE}:${params.IMAGE_TAG}"
+                checkout scm
             }
         }
 
-        stage('Pull Image') {
-            steps {
-                sh "docker pull ${REGISTRY_IMAGE}:${params.IMAGE_TAG}"
-            }
-        }
-
-        stage('Stop Old Container') {
+        stage('Build Docker Image') {
             steps {
                 sh '''
-                    docker stop ${APP_CONTAINER} || true
-                    docker rm ${APP_CONTAINER} || true
+                    cd /workspace/devops-lab
+                    docker build -t ${IMAGE_NAME}:${IMAGE_TAG} -f docker/Dockerfile .
                 '''
             }
         }
 
-        stage('Run New Container') {
-            steps {
-                sh """
-                    docker run -d \
-                      --name ${APP_CONTAINER} \
-                      -p ${APP_PORT}:8000 \
-                      -e APP_NAME=${APP_NAME} \
-                      -e APP_ENV=${APP_ENV} \
-                      -e APP_VERSION=${params.IMAGE_TAG} \
-                      ${REGISTRY_IMAGE}:${params.IMAGE_TAG}
-                """
-            }
-        }
-
-        stage('Check Container Running') {
+        stage('Push Docker Image') {
             steps {
                 sh '''
-                    sleep 5
-                    docker ps --filter "name=${APP_CONTAINER}" --filter "status=running"
-                    docker inspect -f '{{.State.Running}}' ${APP_CONTAINER} | grep true
+                    docker push ${IMAGE_NAME}:${IMAGE_TAG}
                 '''
             }
         }
 
-        stage('Health Check') {
+        stage('Deploy to Kubernetes') {
             steps {
                 sh '''
-                    sleep 5
-                    curl --fail http://${DEPLOY_HOST}:${APP_PORT}/health
-                    curl --fail http://${DEPLOY_HOST}:${APP_PORT}/version
-                    curl --fail http://${DEPLOY_HOST}:${APP_PORT}/info
+                    export KUBECONFIG=$KUBECONFIG_FILE
+
+                    kubectl set image deployment/devops-platform \
+                      devops-platform=${IMAGE_NAME}:${IMAGE_TAG} \
+                      -n default
+
+                    kubectl set env deployment/devops-platform \
+                      APP_VERSION=${IMAGE_TAG} \
+                      -n default
+
+                    kubectl rollout status deployment/devops-platform -n default --timeout=180s
+                    kubectl get pods -n default -o wide
                 '''
             }
-        }
-
-        stage('Show Logs') {
-            steps {
-                sh 'docker logs --tail 50 ${APP_CONTAINER} || true'
-            }
-        }
-    }
-
-    post {
-        success {
-            echo "Deployment successful: ${REGISTRY_IMAGE}:${params.IMAGE_TAG}"
-        }
-        failure {
-            echo "Deployment failed."
-            sh '''
-                docker ps -a || true
-                docker logs --tail 100 ${APP_CONTAINER} || true
-            '''
         }
     }
 }
