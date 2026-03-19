@@ -16,12 +16,6 @@ pipeline {
     }
 
     stages {
-        stage('Checkout SCM') {
-            steps {
-                checkout scm
-            }
-        }
-
         stage('Show Build Target') {
             steps {
                 echo "Building image: ${REGISTRY_IMAGE}:${IMAGE_TAG}"
@@ -79,21 +73,29 @@ pipeline {
 
         stage('Commit and Push to Git') {
             steps {
-                sh '''
-                    set -e
+                withCredentials([usernamePassword(
+                    credentialsId: 'github-push-creds',
+                    usernameVariable: 'GIT_USERNAME',
+                    passwordVariable: 'GIT_TOKEN'
+                )]) {
+                    sh '''
+                        set -e
 
-                    git config user.name "Jenkins"
-                    git config user.email "jenkins@local"
+                        git config user.name "Jenkins"
+                        git config user.email "jenkins@local"
 
-                    if git diff --quiet -- "${MANIFEST_FILE}"; then
-                      echo "No changes detected in manifest."
-                      exit 0
-                    fi
+                        if git diff --quiet -- "${MANIFEST_FILE}"; then
+                          echo "No changes detected in manifest."
+                          exit 0
+                        fi
 
-                    git add "${MANIFEST_FILE}"
-                    git commit -m "GitOps deploy ${DEPLOYMENT_NAME}:${IMAGE_TAG}"
-                    git push origin HEAD:${GIT_BRANCH}
-                '''
+                        git add "${MANIFEST_FILE}"
+                        git commit -m "GitOps deploy ${DEPLOYMENT_NAME}:${IMAGE_TAG}"
+
+                        git remote set-url origin https://${GIT_USERNAME}:${GIT_TOKEN}@github.com/dzidzi91/devops-home-lab.git
+                        git push origin HEAD:${GIT_BRANCH}
+                    '''
+                }
             }
         }
 
@@ -106,9 +108,8 @@ pipeline {
                     for i in $(seq 1 48); do
                       SYNC_STATUS=$(kubectl get application ${ARGO_APP_NAME} -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || true)
                       HEALTH_STATUS=$(kubectl get application ${ARGO_APP_NAME} -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || true)
-                      REVISION=$(kubectl get application ${ARGO_APP_NAME} -n argocd -o jsonpath='{.status.sync.revision}' 2>/dev/null || true)
 
-                      echo "Attempt $i/48 -> Sync=${SYNC_STATUS}, Health=${HEALTH_STATUS}, Revision=${REVISION}"
+                      echo "Attempt $i/48 -> Sync=${SYNC_STATUS}, Health=${HEALTH_STATUS}"
 
                       if [ "$SYNC_STATUS" = "Synced" ] && [ "$HEALTH_STATUS" = "Healthy" ]; then
                         echo "Argo CD app is Synced and Healthy."
@@ -118,7 +119,6 @@ pipeline {
                       sleep 5
                     done
 
-                    echo "Argo CD did not become Synced/Healthy in time."
                     kubectl describe application ${ARGO_APP_NAME} -n argocd || true
                     exit 1
                 '''
@@ -130,10 +130,7 @@ pipeline {
                 sh '''
                     set -e
                     export KUBECONFIG=$KUBECONFIG_FILE
-
-                    kubectl rollout status deployment/${DEPLOYMENT_NAME} \
-                      -n ${K8S_NAMESPACE} \
-                      --timeout=180s
+                    kubectl rollout status deployment/${DEPLOYMENT_NAME} -n ${K8S_NAMESPACE} --timeout=180s
                 '''
             }
         }
@@ -148,36 +145,6 @@ pipeline {
                     curl --fail http://${APP_HOST}:${APP_PORT}/info
                 '''
             }
-        }
-
-        stage('Show Logs') {
-            steps {
-                sh '''
-                    export KUBECONFIG=$KUBECONFIG_FILE
-                    POD_NAME=$(kubectl get pods -n ${K8S_NAMESPACE} -l app=devops-platform -o jsonpath='{.items[0].metadata.name}')
-                    kubectl logs -n ${K8S_NAMESPACE} $POD_NAME --tail=50 || true
-                '''
-            }
-        }
-    }
-
-    post {
-        success {
-            echo "GitOps deployment successful: ${REGISTRY_IMAGE}:${IMAGE_TAG}"
-        }
-        failure {
-            echo "GitOps deployment failed."
-            sh '''
-                export KUBECONFIG=$KUBECONFIG_FILE
-                kubectl get application ${ARGO_APP_NAME} -n argocd -o wide || true
-                kubectl describe application ${ARGO_APP_NAME} -n argocd || true
-                kubectl get pods -n ${K8S_NAMESPACE} -o wide || true
-                kubectl describe deployment ${DEPLOYMENT_NAME} -n ${K8S_NAMESPACE} || true
-                POD_NAME=$(kubectl get pods -n ${K8S_NAMESPACE} -l app=devops-platform -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
-                if [ -n "$POD_NAME" ]; then
-                  kubectl logs -n ${K8S_NAMESPACE} $POD_NAME --tail=100 || true
-                fi
-            '''
         }
     }
 }
