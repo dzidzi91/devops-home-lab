@@ -74,7 +74,7 @@ pipeline {
         stage('Commit and Push to Git') {
             steps {
                 withCredentials([usernamePassword(
-                    credentialsId: 'github-push-creds',
+                    credentialsId: 'GitHub-push-creds',
                     usernameVariable: 'GIT_USERNAME',
                     passwordVariable: 'GIT_TOKEN'
                 )]) {
