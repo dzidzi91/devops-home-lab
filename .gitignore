@@ -10,3 +10,4 @@ docker/data/
 .env
 slack.url
 jenkins-kubeconfig
+argocd-backup-20260319121723/
