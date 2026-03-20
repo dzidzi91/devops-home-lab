@@ -3,7 +3,8 @@ pipeline {
 
     environment {
         REGISTRY_IMAGE    = "192.168.56.10:5000/devops-platform-app"
-        KUBECONFIG_FILE   = credentials('k8s-homelab-kubeconfig')
+        # KUBECONFIG is provided via withCredentials(file: 'k8s-homelab-kubeconfig') where needed
+        KUBECONFIG_FILE   = ""
         K8S_NAMESPACE     = "devops"
         DEPLOYMENT_NAME   = "devops-platform"
         APP_HOST          = "192.168.56.12"
@@ -67,14 +68,16 @@ pipeline {
 
         stage('Check Kubernetes & Argo Access') {
             steps {
-                sh '''
-                    set -e
-                    export KUBECONFIG=$KUBECONFIG_FILE
+                withCredentials([file(credentialsId: 'k8s-homelab-kubeconfig', variable: 'KUBECONFIG_FILE')]) {
+                    sh '''
+                        set -e
+                        export KUBECONFIG=$KUBECONFIG_FILE
 
-                    kubectl get nodes
-                    kubectl get application ${ARGO_APP_NAME} -n argocd
-                    kubectl get deployment ${DEPLOYMENT_NAME} -n ${K8S_NAMESPACE} || true
-                '''
+                        kubectl get nodes
+                        kubectl get application ${ARGO_APP_NAME} -n argocd || true
+                        kubectl get deployment ${DEPLOYMENT_NAME} -n ${K8S_NAMESPACE} || true
+                    '''
+                }
             }
         }
 
@@ -143,77 +146,85 @@ pipeline {
 
         stage('Force Argo Refresh') {
             steps {
-                sh '''
-                    set -e
-                    export KUBECONFIG=$KUBECONFIG_FILE
-                    kubectl annotate application ${ARGO_APP_NAME} -n argocd argocd.argoproj.io/refresh=hard --overwrite
-                '''
+                withCredentials([file(credentialsId: 'k8s-homelab-kubeconfig', variable: 'KUBECONFIG_FILE')]) {
+                    sh '''
+                        set -e
+                        export KUBECONFIG=$KUBECONFIG_FILE
+                        kubectl annotate application ${ARGO_APP_NAME} -n argocd argocd.argoproj.io/refresh=hard --overwrite || true
+                    '''
+                }
             }
         }
 
         stage('Wait for Argo CD Sync') {
             steps {
-                sh '''
-                    set -e
-                    export KUBECONFIG=$KUBECONFIG_FILE
+                                withCredentials([file(credentialsId: 'k8s-homelab-kubeconfig', variable: 'KUBECONFIG_FILE')]) {
+                                        sh '''
+                                                set -e
+                                                export KUBECONFIG=$KUBECONFIG_FILE
 
-                    TARGET_REVISION=$(cat .gitops_target_revision)
-                    echo "Waiting for Argo CD to sync revision: $TARGET_REVISION"
+                                                TARGET_REVISION=$(cat .gitops_target_revision)
+                                                echo "Waiting for Argo CD to sync revision: $TARGET_REVISION"
 
-                    for i in $(seq 1 60); do
-                      SYNC_STATUS=$(kubectl get application ${ARGO_APP_NAME} -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || true)
-                      HEALTH_STATUS=$(kubectl get application ${ARGO_APP_NAME} -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || true)
-                      LIVE_REVISION=$(kubectl get application ${ARGO_APP_NAME} -n argocd -o jsonpath='{.status.sync.revision}' 2>/dev/null || true)
+                                                for i in $(seq 1 60); do
+                                                    SYNC_STATUS=$(kubectl get application ${ARGO_APP_NAME} -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || true)
+                                                    HEALTH_STATUS=$(kubectl get application ${ARGO_APP_NAME} -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || true)
+                                                    LIVE_REVISION=$(kubectl get application ${ARGO_APP_NAME} -n argocd -o jsonpath='{.status.sync.revision}' 2>/dev/null || true)
 
-                      echo "Attempt $i/60 -> Sync=${SYNC_STATUS}, Health=${HEALTH_STATUS}, LiveRevision=${LIVE_REVISION}, TargetRevision=${TARGET_REVISION}"
+                                                    echo "Attempt $i/60 -> Sync=${SYNC_STATUS}, Health=${HEALTH_STATUS}, LiveRevision=${LIVE_REVISION}, TargetRevision=${TARGET_REVISION}"
 
-                      if [ "$LIVE_REVISION" = "$TARGET_REVISION" ] && [ "$SYNC_STATUS" = "Synced" ] && [ "$HEALTH_STATUS" = "Healthy" ]; then
-                        echo "Argo CD synced expected revision."
-                        exit 0
-                      fi
+                                                    if [ "$LIVE_REVISION" = "$TARGET_REVISION" ] && [ "$SYNC_STATUS" = "Synced" ] && [ "$HEALTH_STATUS" = "Healthy" ]; then
+                                                        echo "Argo CD synced expected revision."
+                                                        exit 0
+                                                    fi
 
-                      sleep 5
-                    done
+                                                    sleep 5
+                                                done
 
-                    echo "Argo CD did not sync expected revision in time."
-                    kubectl describe application ${ARGO_APP_NAME} -n argocd || true
-                    exit 1
-                '''
+                                                echo "Argo CD did not sync expected revision in time."
+                                                kubectl describe application ${ARGO_APP_NAME} -n argocd || true
+                                                exit 1
+                                        '''
+                                }
             }
         }
 
         stage('Wait for Deployment Rollout') {
             steps {
-                sh '''
-                    set -e
-                    export KUBECONFIG=$KUBECONFIG_FILE
-                    kubectl rollout status deployment/${DEPLOYMENT_NAME} -n ${K8S_NAMESPACE} --timeout=180s
-                '''
+                withCredentials([file(credentialsId: 'k8s-homelab-kubeconfig', variable: 'KUBECONFIG_FILE')]) {
+                    sh '''
+                        set -e
+                        export KUBECONFIG=$KUBECONFIG_FILE
+                        kubectl rollout status deployment/${DEPLOYMENT_NAME} -n ${K8S_NAMESPACE} --timeout=180s
+                    '''
+                }
             }
         }
 
         stage('Verify Deployed Image') {
             steps {
-                sh '''
-                    set -e
-                    export KUBECONFIG=$KUBECONFIG_FILE
+                                withCredentials([file(credentialsId: 'k8s-homelab-kubeconfig', variable: 'KUBECONFIG_FILE')]) {
+                                        sh '''
+                                                set -e
+                                                export KUBECONFIG=$KUBECONFIG_FILE
 
-                    for i in $(seq 1 36); do
-                      LIVE_IMAGE=$(kubectl get deployment ${DEPLOYMENT_NAME} -n ${K8S_NAMESPACE} -o jsonpath='{.spec.template.spec.containers[0].image}')
-                      echo "Attempt $i/36 -> Live image: $LIVE_IMAGE, Expected: ${REGISTRY_IMAGE}:${IMAGE_TAG}"
+                                                for i in $(seq 1 36); do
+                                                    LIVE_IMAGE=$(kubectl get deployment ${DEPLOYMENT_NAME} -n ${K8S_NAMESPACE} -o jsonpath='{.spec.template.spec.containers[0].image}')
+                                                    echo "Attempt $i/36 -> Live image: $LIVE_IMAGE, Expected: ${REGISTRY_IMAGE}:${IMAGE_TAG}"
 
-                      if [ "$LIVE_IMAGE" = "${REGISTRY_IMAGE}:${IMAGE_TAG}" ]; then
-                        echo "Deployment image matches expected image."
-                        exit 0
-                      fi
+                                                    if [ "$LIVE_IMAGE" = "${REGISTRY_IMAGE}:${IMAGE_TAG}" ]; then
+                                                        echo "Deployment image matches expected image."
+                                                        exit 0
+                                                    fi
 
-                      sleep 5
-                    done
+                                                    sleep 5
+                                                done
 
-                    echo "Deployment image mismatch after waiting!"
-                    kubectl get deployment ${DEPLOYMENT_NAME} -n ${K8S_NAMESPACE} -o yaml | grep image: || true
-                    exit 1
-                '''
+                                                echo "Deployment image mismatch after waiting!"
+                                                kubectl get deployment ${DEPLOYMENT_NAME} -n ${K8S_NAMESPACE} -o yaml | grep image: || true
+                                                exit 1
+                                        '''
+                                }
             }
         }
 
@@ -236,17 +247,18 @@ pipeline {
         }
         failure {
             echo "GitOps deployment failed."
-            sh '''
-                export KUBECONFIG=$KUBECONFIG_FILE
-                kubectl get application ${ARGO_APP_NAME} -n argocd -o wide || true
-                kubectl describe application ${ARGO_APP_NAME} -n argocd || true
-                kubectl get pods -n ${K8S_NAMESPACE} -o wide || true
-                kubectl describe deployment ${DEPLOYMENT_NAME} -n ${K8S_NAMESPACE} || true
-                POD_NAME=$(kubectl get pods -n ${K8S_NAMESPACE} -l app=devops-platform -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
-                if [ -n "$POD_NAME" ]; then
-                  kubectl logs -n ${K8S_NAMESPACE} $POD_NAME --tail=100 || true
-                fi
-            '''
+            withCredentials([file(credentialsId: 'k8s-homelab-kubeconfig', variable: 'KUBECONFIG_FILE')]) {
+                sh '''
+                    export KUBECONFIG=$KUBECONFIG_FILE
+                    kubectl get application ${ARGO_APP_NAME} -n argocd -o wide || true
+                    kubectl describe application ${ARGO_APP_NAME} -n argocd || true
+                    kubectl get pods -n ${K8S_NAMESPACE} -o wide || true
+                    kubectl describe deployment ${DEPLOYMENT_NAME} -n ${K8S_NAMESPACE} || true
+                    POD_NAME=$(kubectl get pods -n ${K8S_NAMESPACE} -l app=devops-platform -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+                    if [ -n "$POD_NAME" ]; then
+                      kubectl logs -n ${K8S_NAMESPACE} $POD_NAME --tail=100 || true
+                    fi
+                '''
+            }
         }
     }
-}
