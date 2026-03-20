@@ -20,13 +20,6 @@ pipeline {
         timestamps()
     }
 
-    stages {
-        stage('Checkout Source') {
-            steps {
-                checkout scm
-            }
-        }
-
         stage('Stop Self Trigger Loop') {
             steps {
                 script {
@@ -37,10 +30,10 @@ pipeline {
 
                     echo "Last commit message: ${lastCommitMsg}"
 
-                    if (lastCommitMsg.startsWith('[jenkins-gitops]')) {
-                        currentBuild.result = 'NOT_BUILT'
-                        error('Stopping self-triggered Jenkins build.')
-                    }
+                    if (lastCommitMsg.startsWith('[jenkins-gitops]') || lastCommitMsg.startsWith('[rollback]')) {
+    currentBuild.result = 'NOT_BUILT'
+    error('Stopping build for GitOps-managed commit.')
+}
                 }
             }
         }
