@@ -1,0 +1,19 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: devops-test-alert
+  namespace: monitoring
+  labels:
+    release: monitoring
+spec:
+  groups:
+    - name: devops-test.rules
+      rules:
+        - alert: DevOpsTestAlert
+          expr: vector(1)
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "DevOps test alert"
+            description: "Ovo je test alert za proveru Prometheus/Alertmanager lanca."
