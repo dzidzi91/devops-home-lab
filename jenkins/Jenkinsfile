@@ -148,6 +148,16 @@ pipeline {
             }
         }
 
+        stage('Force Argo Refresh') {
+            steps {
+                sh '''
+                    set -e
+                    export KUBECONFIG=$KUBECONFIG_FILE
+                    kubectl annotate application ${ARGO_APP_NAME} -n argocd argocd.argoproj.io/refresh=hard --overwrite
+                '''
+            }
+        }
+
         stage('Wait for Argo CD Sync') {
             steps {
                 sh '''
@@ -164,8 +174,8 @@ pipeline {
 
                       echo "Attempt $i/60 -> Sync=${SYNC_STATUS}, Health=${HEALTH_STATUS}, LiveRevision=${LIVE_REVISION}, TargetRevision=${TARGET_REVISION}"
 
-                      if [ "$SYNC_STATUS" = "Synced" ] && [ "$HEALTH_STATUS" = "Healthy" ] && [ "$LIVE_REVISION" = "$TARGET_REVISION" ]; then
-                        echo "Argo CD synced the expected revision."
+                      if [ "$LIVE_REVISION" = "$TARGET_REVISION" ] && [ "$SYNC_STATUS" = "Synced" ] && [ "$HEALTH_STATUS" = "Healthy" ]; then
+                        echo "Argo CD synced expected revision."
                         exit 0
                       fi
 
@@ -195,13 +205,21 @@ pipeline {
                     set -e
                     export KUBECONFIG=$KUBECONFIG_FILE
 
-                    LIVE_IMAGE=$(kubectl get deployment ${DEPLOYMENT_NAME} -n ${K8S_NAMESPACE} -o jsonpath='{.spec.template.spec.containers[0].image}')
-                    echo "Live image: $LIVE_IMAGE"
+                    for i in $(seq 1 36); do
+                      LIVE_IMAGE=$(kubectl get deployment ${DEPLOYMENT_NAME} -n ${K8S_NAMESPACE} -o jsonpath='{.spec.template.spec.containers[0].image}')
+                      echo "Attempt $i/36 -> Live image: $LIVE_IMAGE, Expected: ${REGISTRY_IMAGE}:${IMAGE_TAG}"
 
-                    if [ "$LIVE_IMAGE" != "${REGISTRY_IMAGE}:${IMAGE_TAG}" ]; then
-                      echo "Deployment image mismatch!"
-                      exit 1
-                    fi
+                      if [ "$LIVE_IMAGE" = "${REGISTRY_IMAGE}:${IMAGE_TAG}" ]; then
+                        echo "Deployment image matches expected image."
+                        exit 0
+                      fi
+
+                      sleep 5
+                    done
+
+                    echo "Deployment image mismatch after waiting!"
+                    kubectl get deployment ${DEPLOYMENT_NAME} -n ${K8S_NAMESPACE} -o yaml | grep image: || true
+                    exit 1
                 '''
             }
         }
