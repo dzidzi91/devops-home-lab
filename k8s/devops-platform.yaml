@@ -44,11 +44,13 @@ kind: Service
 metadata:
   name: devops-platform
   namespace: devops
+  labels:
+    app: devops-platform
 spec:
   selector:
     app: devops-platform
-  type: NodePort
   ports:
-    - port: 8000
+    - name: http
+      port: 8000
       targetPort: 8000
-      nodePort: 30080
+  type: ClusterIP
