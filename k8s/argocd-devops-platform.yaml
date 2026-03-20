@@ -9,7 +9,7 @@ spec:
     repoURL: 
       https://github.com/dzidzi91/devops-home-lab.git
     targetRevision: HEAD
-    path: k8s
+    path: k8s/devops-platform
   destination:
     server: https://kubernetes.default.svc
     namespace: devops
