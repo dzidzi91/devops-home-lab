@@ -3,8 +3,8 @@ pipeline {
 
     environment {
         REGISTRY_IMAGE    = "192.168.56.10:5000/devops-platform-app"
-        # KUBECONFIG is provided via withCredentials(file: 'k8s-homelab-kubeconfig') where needed
-        KUBECONFIG_FILE   = ""
+    // KUBECONFIG is provided via withCredentials(file: 'k8s-homelab-kubeconfig') where needed
+    KUBECONFIG_FILE   = ""
         K8S_NAMESPACE     = "devops"
         DEPLOYMENT_NAME   = "devops-platform"
         APP_HOST          = "192.168.56.12"
