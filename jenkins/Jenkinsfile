@@ -1,6 +1,5 @@
 pipeline {
     agent any
-    
 
     environment {
         REGISTRY_IMAGE   = "192.168.56.10:5000/devops-platform-app"
@@ -17,6 +16,24 @@ pipeline {
     }
 
     stages {
+        stage('Stop Self Trigger Loop') {
+            steps {
+                script {
+                    def lastCommitMsg = sh(
+                        script: "git log -1 --pretty=%B",
+                        returnStdout: true
+                    ).trim()
+
+                    echo "Last commit message: ${lastCommitMsg}"
+
+                    if (lastCommitMsg.startsWith('[jenkins-gitops]')) {
+                        currentBuild.result = 'NOT_BUILT'
+                        error('Stopping self-triggered Jenkins build.')
+                    }
+                }
+            }
+        }
+
         stage('Show Build Target') {
             steps {
                 echo "Building image: ${REGISTRY_IMAGE}:${IMAGE_TAG}"
@@ -87,11 +104,16 @@ pipeline {
 
                         if git diff --quiet -- "${MANIFEST_FILE}"; then
                           echo "No changes detected in manifest."
+                          git rev-parse HEAD > .gitops_target_revision
                           exit 0
                         fi
 
                         git add "${MANIFEST_FILE}"
-                        git commit -m "GitOps deploy ${DEPLOYMENT_NAME}:${IMAGE_TAG}"
+                        git commit -m "[jenkins-gitops] deploy ${DEPLOYMENT_NAME}:${IMAGE_TAG}"
+
+                        NEW_REVISION=$(git rev-parse HEAD)
+                        echo "$NEW_REVISION" > .gitops_target_revision
+                        echo "New Git revision: $NEW_REVISION"
 
                         git remote set-url origin https://${GIT_USERNAME}:${GIT_TOKEN}@github.com/dzidzi91/devops-home-lab.git
                         git push origin HEAD:${GIT_BRANCH}
@@ -106,20 +128,25 @@ pipeline {
                     set -e
                     export KUBECONFIG=$KUBECONFIG_FILE
 
-                    for i in $(seq 1 48); do
+                    TARGET_REVISION=$(cat .gitops_target_revision)
+                    echo "Waiting for Argo CD to sync revision: $TARGET_REVISION"
+
+                    for i in $(seq 1 60); do
                       SYNC_STATUS=$(kubectl get application ${ARGO_APP_NAME} -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || true)
                       HEALTH_STATUS=$(kubectl get application ${ARGO_APP_NAME} -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || true)
+                      LIVE_REVISION=$(kubectl get application ${ARGO_APP_NAME} -n argocd -o jsonpath='{.status.sync.revision}' 2>/dev/null || true)
 
-                      echo "Attempt $i/48 -> Sync=${SYNC_STATUS}, Health=${HEALTH_STATUS}"
+                      echo "Attempt $i/60 -> Sync=${SYNC_STATUS}, Health=${HEALTH_STATUS}, LiveRevision=${LIVE_REVISION}, TargetRevision=${TARGET_REVISION}"
 
-                      if [ "$SYNC_STATUS" = "Synced" ] && [ "$HEALTH_STATUS" = "Healthy" ]; then
-                        echo "Argo CD app is Synced and Healthy."
+                      if [ "$SYNC_STATUS" = "Synced" ] && [ "$HEALTH_STATUS" = "Healthy" ] && [ "$LIVE_REVISION" = "$TARGET_REVISION" ]; then
+                        echo "Argo CD synced the expected revision."
                         exit 0
                       fi
 
                       sleep 5
                     done
 
+                    echo "Argo CD did not sync expected revision in time."
                     kubectl describe application ${ARGO_APP_NAME} -n argocd || true
                     exit 1
                 '''
@@ -136,6 +163,23 @@ pipeline {
             }
         }
 
+        stage('Verify Deployed Image') {
+            steps {
+                sh '''
+                    set -e
+                    export KUBECONFIG=$KUBECONFIG_FILE
+
+                    LIVE_IMAGE=$(kubectl get deployment ${DEPLOYMENT_NAME} -n ${K8S_NAMESPACE} -o jsonpath='{.spec.template.spec.containers[0].image}')
+                    echo "Live image: $LIVE_IMAGE"
+
+                    if [ "$LIVE_IMAGE" != "${REGISTRY_IMAGE}:${IMAGE_TAG}" ]; then
+                      echo "Deployment image mismatch!"
+                      exit 1
+                    fi
+                '''
+            }
+        }
+
         stage('Health Check') {
             steps {
                 sh '''
@@ -146,6 +190,26 @@ pipeline {
                     curl --fail http://${APP_HOST}:${APP_PORT}/info
                 '''
             }
+        }
+    }
+
+    post {
+        success {
+            echo "GitOps deployment successful: ${REGISTRY_IMAGE}:${IMAGE_TAG}"
+        }
+        failure {
+            echo "GitOps deployment failed."
+            sh '''
+                export KUBECONFIG=$KUBECONFIG_FILE
+                kubectl get application ${ARGO_APP_NAME} -n argocd -o wide || true
+                kubectl describe application ${ARGO_APP_NAME} -n argocd || true
+                kubectl get pods -n ${K8S_NAMESPACE} -o wide || true
+                kubectl describe deployment ${DEPLOYMENT_NAME} -n ${K8S_NAMESPACE} || true
+                POD_NAME=$(kubectl get pods -n ${K8S_NAMESPACE} -l app=devops-platform -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+                if [ -n "$POD_NAME" ]; then
+                  kubectl logs -n ${K8S_NAMESPACE} $POD_NAME --tail=100 || true
+                fi
+            '''
         }
     }
 }
