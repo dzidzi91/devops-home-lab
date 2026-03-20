@@ -1,0 +1,23 @@
+replicaCount: 1
+
+image:
+  repository: 192.168.56.10:5000/devops-platform-app
+  pullPolicy: IfNotPresent
+  tag: "build-11"
+
+service:
+  type: NodePort
+  port: 8000
+  nodePort: 30080
+
+ingress:
+  enabled: false
+
+resources: {}
+
+autoscaling:
+  enabled: false
+
+fullnameOverride: "devops-platform"
+
+containerPort: 8000

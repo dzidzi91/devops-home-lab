@@ -2,20 +2,31 @@ pipeline {
     agent any
 
     environment {
-        REGISTRY_IMAGE   = "192.168.56.10:5000/devops-platform-app"
-        KUBECONFIG_FILE  = credentials('k8s-homelab-kubeconfig')
-        K8S_NAMESPACE    = "devops"
-        DEPLOYMENT_NAME  = "devops-platform"
-        CONTAINER_NAME   = "devops-platform"
-        APP_HOST         = "192.168.56.12"
-        APP_PORT         = "30080"
-        GIT_BRANCH       = "main"
-        MANIFEST_FILE    = "k8s/devops-platform.yaml"
-        ARGO_APP_NAME    = "devops-platform"
-        IMAGE_TAG        = "build-${BUILD_NUMBER}"
+        REGISTRY_IMAGE    = "192.168.56.10:5000/devops-platform-app"
+        KUBECONFIG_FILE   = credentials('k8s-homelab-kubeconfig')
+        K8S_NAMESPACE     = "devops"
+        DEPLOYMENT_NAME   = "devops-platform"
+        APP_HOST          = "192.168.56.12"
+        APP_PORT          = "30080"
+        GIT_BRANCH        = "main"
+        HELM_CHART_PATH   = "k8s/devops-platform"
+        HELM_VALUES_FILE  = "k8s/devops-platform/values.yaml"
+        ARGO_APP_NAME     = "devops-platform"
+        IMAGE_TAG         = "build-${BUILD_NUMBER}"
+    }
+
+    options {
+        disableConcurrentBuilds()
+        timestamps()
     }
 
     stages {
+        stage('Checkout Source') {
+            steps {
+                checkout scm
+            }
+        }
+
         stage('Stop Self Trigger Loop') {
             steps {
                 script {
@@ -37,7 +48,8 @@ pipeline {
         stage('Show Build Target') {
             steps {
                 echo "Building image: ${REGISTRY_IMAGE}:${IMAGE_TAG}"
-                echo "Manifest file: ${MANIFEST_FILE}"
+                echo "Helm chart path: ${HELM_CHART_PATH}"
+                echo "Helm values file: ${HELM_VALUES_FILE}"
                 echo "Argo app: ${ARGO_APP_NAME}"
             }
         }
@@ -68,23 +80,37 @@ pipeline {
 
                     kubectl get nodes
                     kubectl get application ${ARGO_APP_NAME} -n argocd
-                    kubectl get deployment ${DEPLOYMENT_NAME} -n ${K8S_NAMESPACE}
+                    kubectl get deployment ${DEPLOYMENT_NAME} -n ${K8S_NAMESPACE} || true
                 '''
             }
         }
 
-        stage('Update Manifest') {
+        stage('Update Helm Values') {
             steps {
                 sh '''
                     set -e
 
-                    test -f "${MANIFEST_FILE}"
+                    test -f "${HELM_VALUES_FILE}"
 
-                    sed -i "s|image: .*|image: ${REGISTRY_IMAGE}:${IMAGE_TAG}|g" "${MANIFEST_FILE}"
-                    sed -i '/name: APP_VERSION/{n;s|value: ".*"|value: "'"${IMAGE_TAG}"'"|;}' "${MANIFEST_FILE}"
+                    echo "values.yaml before update:"
+                    cat "${HELM_VALUES_FILE}"
 
-                    echo "Manifest after update:"
-                    grep -nE "image:|APP_VERSION|value:" "${MANIFEST_FILE}" || true
+                    sed -i 's|repository: .*|repository: '"${REGISTRY_IMAGE}"'|' "${HELM_VALUES_FILE}"
+                    sed -i 's|tag: ".*"|tag: "'"${IMAGE_TAG}"'"|' "${HELM_VALUES_FILE}"
+
+                    echo "values.yaml after update:"
+                    cat "${HELM_VALUES_FILE}"
+                '''
+            }
+        }
+
+        stage('Validate Helm Chart') {
+            steps {
+                sh '''
+                    set -e
+                    helm template devops-platform ${HELM_CHART_PATH} > /tmp/devops-platform-rendered.yaml
+                    test -s /tmp/devops-platform-rendered.yaml
+                    echo "Helm chart rendered successfully."
                 '''
             }
         }
@@ -102,13 +128,13 @@ pipeline {
                         git config user.name "Jenkins"
                         git config user.email "jenkins@local"
 
-                        if git diff --quiet -- "${MANIFEST_FILE}"; then
-                          echo "No changes detected in manifest."
+                        if git diff --quiet -- "${HELM_VALUES_FILE}"; then
+                          echo "No changes detected in Helm values."
                           git rev-parse HEAD > .gitops_target_revision
                           exit 0
                         fi
 
-                        git add "${MANIFEST_FILE}"
+                        git add "${HELM_VALUES_FILE}"
                         git commit -m "[jenkins-gitops] deploy ${DEPLOYMENT_NAME}:${IMAGE_TAG}"
 
                         NEW_REVISION=$(git rev-parse HEAD)
