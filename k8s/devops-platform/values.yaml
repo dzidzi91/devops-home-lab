@@ -3,7 +3,7 @@ replicaCount: 1
 image:
   repository: 192.168.56.10:5000/devops-platform-app
   pullPolicy: IfNotPresent
-  tag: "build-158"
+  tag: "build-160"
 
 service:
   type: NodePort
