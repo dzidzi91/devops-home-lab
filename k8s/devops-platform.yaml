@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: devops-platform
-          image: 192.168.56.10:5000/devops-platform-app:build-122
+          image: 192.168.56.10:5000/devops-platform-app:build-123
           imagePullPolicy: Always
           ports:
             - containerPort: 8000
@@ -25,7 +25,7 @@ spec:
             - name: APP_ENV
               value: "k8s"
             - name: APP_VERSION
-              value: "build-122"
+              value: "build-123"
           livenessProbe:
             httpGet:
               path: /health
