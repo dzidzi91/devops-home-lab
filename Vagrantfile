@@ -14,6 +14,20 @@ Vagrant.configure("2") do |config|
   end
 
   #################################
+  # DEVOPS CONTROL
+  #################################
+  config.vm.define "management" do |dc|
+    dc.vm.hostname = "devops-control"
+    dc.vm.network "private_network", ip: "192.168.56.10"
+
+    dc.vm.provider "virtualbox" do |vb|
+      vb.name = "devops-control"
+      vb.memory = 4096
+      vb.cpus = 2
+    end
+  end
+
+  #################################
   # CONTROL PLANE
   #################################
   config.vm.define "control-plane" do |cp|
